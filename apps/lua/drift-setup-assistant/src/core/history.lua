@@ -64,16 +64,21 @@ function M.setVerdict(h, n, verdict)
   if v then v.verdict = verdict end
 end
 
-function M.addRun(h, n, metrics, feedback, now)
+-- extra: { excluded = bool, mistakes = { {kind, t, text} } }. Excluded runs are
+-- kept for the log but never count toward tuning or comparisons.
+function M.addRun(h, n, metrics, feedback, now, extra)
   local r = { version = n, metrics = metrics, feedback = feedback or {}, at = now }
+  if extra then r.excluded, r.mistakes = extra.excluded or nil, extra.mistakes end
   h.runs[#h.runs + 1] = r
   while #h.runs > M.MAX_RUNS do table.remove(h.runs, 1) end
   return r
 end
 
-function M.runsFor(h, n)
+function M.runsFor(h, n, includeExcluded)
   local out = {}
-  for _, r in ipairs(h.runs) do if r.version == n then out[#out + 1] = r end end
+  for _, r in ipairs(h.runs) do
+    if r.version == n and (includeExcluded or not r.excluded) then out[#out + 1] = r end
+  end
   return out
 end
 
@@ -91,11 +96,28 @@ function M.feedbackFor(h, n)
   return out
 end
 
--- The change that produced the active version, with its verdict, for the recommender.
-function M.lastChange(h)
+-- A version's changes as a list. Versions saved before multi-change support
+-- have a single `change` plus `symptomId`.
+function M.changesOf(v)
+  if not v then return {} end
+  if v.changes then return v.changes end
+  if v.change then
+    local c = util.deepcopy(v.change)
+    c.symptomId = c.symptomId or v.symptomId
+    c.symptomName = c.symptomName or v.symptomName
+    return { c }
+  end
+  return {}
+end
+
+-- The changes that produced the active version, with its verdict, for the recommender.
+function M.lastChanges(h)
   local v = M.active(h)
-  if not v or not v.change then return nil end
-  return { lever = v.change.lever, direction = v.change.direction, verdict = v.verdict }
+  local out = {}
+  for _, c in ipairs(M.changesOf(v)) do
+    out[#out + 1] = { lever = c.lever, direction = c.direction, verdict = v.verdict }
+  end
+  return out
 end
 
 function M.block(h, lever, direction, symptomId)
@@ -122,10 +144,9 @@ function M.revert(h, targetN)
   local v = M.active(h)
   local guard = 0
   while v and v.n ~= targetN and guard < 100 do
-    if v.change then
-      M.block(h, v.change.lever, v.change.direction, v.symptomId)
-      if v.verdict ~= 'worse' then v.verdict = 'reverted' end
-    end
+    local changes = M.changesOf(v)
+    for _, c in ipairs(changes) do M.block(h, c.lever, c.direction, c.symptomId) end
+    if #changes > 0 and v.verdict ~= 'worse' then v.verdict = 'reverted' end
     v = v.parent and M.get(h, v.parent) or nil
     guard = guard + 1
   end
@@ -137,6 +158,31 @@ function M.maxN(h)
   local max = 0
   for _, v in ipairs(h.versions) do if v.n > max then max = v.n end end
   return max
+end
+
+-- Session start -----------------------------------------------------------------
+-- h.start = { mode = 'baseline' | 'own', version = n, needed = 3 } once the driver
+-- has chosen how to begin; h.calibrated is set after the first evaluation.
+
+-- Histories from before this existed (already tuning) skip the start choice.
+function M.migrate(h)
+  if h.start == nil and #h.versions > 1 then
+    h.start = { mode = 'own', version = h.activeN or 0, needed = 0 }
+    h.calibrated = true
+  end
+  return h
+end
+
+function M.setStart(h, mode, n, needed)
+  h.start = { mode = mode, version = n, needed = needed or 3 }
+  h.calibrated = false
+end
+
+-- Counted runs on the starting version so far, and how many are needed.
+function M.calibration(h)
+  local needed = h.start and h.start.needed or 3
+  local n = h.start and h.start.version or h.activeN
+  return #M.runsFor(h, n), needed, n
 end
 
 return M

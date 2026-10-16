@@ -13,6 +13,9 @@ local setupfile = require('src/core/setupfile')
 local compare = require('src/core/compare')
 local baseline = require('src/core/baseline')
 local catalog = require('src/core/catalog')
+local mistakes = require('src/core/mistakes')
+local metricsCore = require('src/core/metrics')
+local recommend = require('src/core/recommend')
 local util = require('src/core/util')
 
 local App = {}
@@ -20,17 +23,28 @@ App.__index = App
 
 App.VERSION = '0.1.0'
 
--- Metrics kept in history per run (numbers only, keeps the JSON small).
-local KEEP_METRICS = { 'totalTime', 'driftTime', 'driftShare', 'segments', 'avgAngle', 'maxAngle', 'angleStd',
-  'avgDriftSpeed', 'spinOut', 'spinScore', 'straightenRatio', 'failedEntryRatio', 'wheelspinRatio', 'lowRpmRatio',
-  'frontWashRatio', 'lockLimitRatio', 'transitionYawAccel', 'bottomingRatio', 'pressureWorstAbs',
-  'brakeAngleLossRatio' }
-
+-- Metrics kept in history per run: every number and label, rounded, so the
+-- calibration runs can be evaluated together later.
 local function summarize(m)
   local out = {}
-  for _, k in ipairs(KEEP_METRICS) do
-    if type(m[k]) == 'number' then out[k] = util.round(m[k], 4) end
+  for k, v in pairs(m) do
+    if type(v) == 'number' then out[k] = util.round(v, 4)
+    elseif type(v) == 'string' then out[k] = v end
   end
+  return out
+end
+
+-- Feedback over several runs: every complaint counts; "felt good" only if
+-- there were no complaints.
+local function combineFeedback(lists)
+  local seen, out, good = {}, {}, false
+  for _, list in ipairs(lists) do
+    for _, f in ipairs(list) do
+      if f == 'felt_good' then good = true
+      elseif not seen[f] then seen[f] = true; out[#out + 1] = f end
+    end
+  end
+  if #out == 0 and good then out[1] = 'felt_good' end
   return out
 end
 
@@ -61,6 +75,9 @@ function App.new()
   self.tab = nil               -- UI asks to switch tab, e.g. after a run
   self.prefs = store.loadPrefs()
   self.profile = store.loadProfile()
+  -- Input device comes from the game's own controls settings, not a question.
+  self.detectedDevice, self.detectedDeviceRaw = cardata.inputDevice()
+  if self.profile and self.detectedDevice then self.profile.device = self.detectedDevice end
   self.readOnly = compat.isOnline()
 
   local rulesText = compat.load(compat.appDir() .. '/rules.json')
@@ -95,7 +112,7 @@ function App:scan()
   self.track = compat.trackId()
   self.overrides = store.loadOverrides(self.car.id)
   self.setupIni = cardata.setupIni()
-  self.history = store.loadHistory(self.car.id, self.track) or history.new(self.car.id, self.track)
+  self.history = history.migrate(store.loadHistory(self.car.id, self.track) or history.new(self.car.id, self.track))
 
   local current, via = cardata.currentSetup()
   self.currentVia = via
@@ -264,7 +281,9 @@ function App:onRunFinished(run)
   -- An unanswered feedback prompt from the previous run is skipped.
   if self.phase == 'feedback' then self:finishRun(nil) end
   local m = engine.analyzeRun(self.rules, run, self.ctx)
-  self.lastRun = { run = run, metrics = m, id = run.id, version = self.history.activeN }
+  local found = mistakes.detect(run, self.rules.mistakes)
+  self.lastRun = { run = run, metrics = m, id = run.id, version = self.history.activeN,
+    mistakes = found, excluded = #found > 0 }
   self.phase = 'feedback'
   self.tab = 'coach'
   if self.prefs.logging then store.logRun(self.sessionLog, run.id, run.samples) end
@@ -272,6 +291,11 @@ end
 
 function App:feedbackOptions()
   return engine.feedbackOptions(self.rules, self.profile)
+end
+
+-- "My mistake" / "Count it anyway" on the run waiting for feedback.
+function App:setRunExcluded(excluded)
+  if self.lastRun then self.lastRun.excluded = excluded end
 end
 
 function App:submitFeedback(ids) self:finishRun(ids or {}) end
@@ -283,17 +307,67 @@ function App:finishRun(feedback)
   feedback = feedback or {}
   local m = lr.metrics
   local h = self.history
+  local kinds = {}
+  for _, x in ipairs(lr.mistakes or {}) do kinds[#kinds + 1] = x.kind end
+  if h.activeN ~= nil then
+    history.addRun(h, h.activeN, summarize(m), feedback, compat.now(), { excluded = lr.excluded, mistakes = lr.mistakes })
+  end
+  self.phase = 'result'
+  local function finish(result)
+    result.runId, result.feedback, result.metrics, result.mistakes = lr.id, feedback, m, lr.mistakes
+    self.result = result
+    store.saveHistory(h)
+    if self.prefs.logging then
+      local row = summarize(m)
+      row.run, row.version, row.endReason = lr.id, h.activeN, lr.run.endReason
+      row.feedback = table.concat(feedback, '|')
+      row.mistakes = (lr.excluded and 'excluded:' or '') .. table.concat(kinds, '|')
+      local rec = result.recommendation
+      local top = rec and rec.options and rec.options[1]
+      row.topSymptom = top and top.symptom.id or (rec and rec.kind) or result.kind
+      store.logSummary(self.sessionLog, row)
+    end
+  end
+
+  -- Driver mistakes: logged, but not used for tuning.
+  if lr.excluded then
+    finish({ kind = 'excluded' })
+    return
+  end
+
+  -- First evaluation waits for enough runs on the starting setup, then looks at them together.
+  local evaluated = 1
+  if not h.calibrated then
+    local count, needed, n = history.calibration(h)
+    if count < needed or h.start == nil then
+      finish({ kind = 'calibrating', count = count, needed = needed, startVersion = n })
+      return
+    end
+    local list, fbs = {}, {}
+    for _, r in ipairs(history.runsFor(h, n)) do
+      list[#list + 1] = r.metrics
+      fbs[#fbs + 1] = r.feedback or {}
+    end
+    m = metricsCore.aggregate(list)
+    feedback = combineFeedback(fbs)
+    evaluated = #list
+    h.calibrated = true
+  end
+
   local d = engine.diagnose(self.rules, m, feedback, self.profile)
-  if h.activeN ~= nil then history.addRun(h, h.activeN, summarize(m), feedback, compat.now()) end
 
   -- F9: compare the active version with its parent once both have runs.
   local cmp
   local active = history.active(h)
   if active and active.parent ~= nil then
-    local rule
-    for _, s in ipairs(self.rules.symptoms) do if s.id == active.symptomId then rule = s end end
+    local targets = {}
+    for _, c in ipairs(history.changesOf(active)) do
+      for _, rule in ipairs(self.rules.symptoms) do
+        if rule.id == c.symptomId then targets[#targets + 1] = rule end
+      end
+    end
     cmp = compare.compare(self.rules, history.metricsFor(h, active.parent), history.metricsFor(h, active.n),
-      rule, history.feedbackFor(h, active.n))
+      targets, history.feedbackFor(h, active.n))
     cmp.version = active
     if cmp.verdict ~= 'not_enough' and active.verdict ~= 'reverted' then
       history.setVerdict(h, active.n, cmp.verdict)
@@ -301,21 +375,28 @@ function App:finishRun(feedback)
   end
 
   local rec = engine.recommend(self.rules, d, self.levers, {
-    history = { lastChange = history.lastChange(h), isBlocked = history.isBlockedFn(h) },
+    history = { lastChanges = history.lastChanges(h), isBlocked = history.isBlockedFn(h) },
     metrics = m, profile = self.profile, feedback = feedback,
   })
-  self.result = { diagnosis = d, recommendation = rec, feedback = feedback, compare = cmp, runId = lr.id, metrics = m }
-  self.phase = 'result'
-  store.saveHistory(h)
+  finish({ kind = 'evaluated', diagnosis = d, recommendation = rec, compare = cmp, evaluatedRuns = evaluated })
+end
 
-  if self.prefs.logging then
-    local row = summarize(m)
-    row.run, row.version, row.endReason = lr.id, h.activeN, lr.run.endReason
-    row.segments = m.segments
-    row.feedback = table.concat(feedback, '|')
-    row.topSymptom = rec.symptom and rec.symptom.id or rec.kind
-    store.logSummary(self.sessionLog, row)
+-- How to begin on a new car/track: 'baseline' writes the starter drift
+-- baseline to load first; 'own' starts from the setup that's loaded now.
+function App:chooseStart(mode)
+  local h = self.history
+  if mode == 'baseline' then
+    local v = self:saveBaseline()
+    if not v then return end
+    history.setStart(h, 'baseline', v.n, 3)
+  else
+    history.setStart(h, 'own', h.activeN or 0, 3)
   end
+  store.saveHistory(h)
+end
+
+function App:needsStartChoice()
+  return self.history.start == nil
 end
 
 -- F8: save the recommendation as a new versioned setup file --------------------
@@ -368,26 +449,33 @@ function App:writeVersion(meta, newValues, headerLines)
   return v
 end
 
-function App:applyRecommendation()
+function App:toggleOption(id)
   local rec = self.result and self.result.recommendation
-  if not rec or rec.kind ~= 'change' then return end
+  if rec then recommend.toggle(rec, id) end
+end
+
+-- F8: writes every ticked change into one new version.
+function App:applyChanges()
+  local rec = self.result and self.result.recommendation
+  if not rec or rec.kind ~= 'changes' then return end
+  local picked = recommend.checked(rec)
+  if #picked == 0 then return end
   local newValues = util.deepcopy(self:activeValues())
-  for _, row in ipairs(rec.plan.items) do
-    if row.moved then newValues[row.name] = row.to end
-  end
+  local changes = {}
   local active = history.active(self.history)
   local header = {
     string.format('Drift Setup Assistant %s - %s', App.VERSION, self.car.id),
-    'Change: ' .. rec.summary,
-    'Why: ' .. rec.why,
     'Based on: ' .. (active and (active.file or 'current setup') or 'current setup'),
   }
-  local v = self:writeVersion({
-    kind = 'change',
-    change = { lever = rec.plan.lever, direction = rec.plan.direction, label = rec.plan.label,
-      directionLabel = rec.plan.directionLabel, summary = rec.summary },
-    symptomId = rec.symptom.id, symptomName = rec.symptom.name,
-  }, newValues, header)
+  for _, o in ipairs(picked) do
+    for _, row in ipairs(o.plan.items) do
+      if row.moved then newValues[row.name] = row.to end
+    end
+    changes[#changes + 1] = { lever = o.plan.lever, direction = o.plan.direction, label = o.plan.label,
+      directionLabel = o.plan.directionLabel, summary = o.summary, symptomId = o.symptom.id, symptomName = o.symptom.name }
+    header[#header + 1] = 'Change: ' .. o.summary .. ' (for: ' .. o.symptom.name .. ')'
+  end
+  local v = self:writeVersion({ kind = 'change', changes = changes }, newValues, header)
   if v then self.result.applied = v end
   return v
 end
@@ -480,6 +568,7 @@ end
 -- Profile, overrides, prefs ----------------------------------------------------
 
 function App:saveProfile(p)
+  if self.detectedDevice then p.device = self.detectedDevice end
   self.profile = p
   store.saveProfile(p)
 end
@@ -510,6 +599,8 @@ function App:diagnostics()
     ctx = self.ctx,
     itemCount = #(self.items or {}),
     readOnly = self.readOnly,
+    inputDevice = self.detectedDevice,
+    inputDeviceRaw = self.detectedDeviceRaw,
   }
 end
 

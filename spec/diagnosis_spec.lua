@@ -47,7 +47,7 @@ describe('F4 symptom detection', function()
     { 'cant_start', 'cant_start' },
     { 'bogging', 'bogs_down' },
     { 'wheelspin', 'wheelspin' },
-    { 'hot_pressure', 'pressure_window' },
+    { 'hot_pressure', 'pressure_rear' },
   }
   for _, e in ipairs(expectations) do
     it('detects ' .. e[2] .. ' from telemetry alone', function()
@@ -91,7 +91,7 @@ describe('F4 symptom detection', function()
   it('dampens telemetry-only symptoms when the driver says it felt good', function()
     local _, d = analyze(sim.scenarios.hot_pressure(), { 'felt_good' })
     for _, s in ipairs(d) do
-      if s.id == 'pressure_window' then assert.is_true(s.confidence < 0.85) end
+      if s.id == 'pressure_rear' then assert.is_true(s.confidence < 0.85) end
     end
   end)
 

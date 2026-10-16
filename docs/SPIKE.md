@@ -46,6 +46,10 @@ The app assumes a setup file's `VALUE` uses the same units as `MIN`/`MAX`/`STEP`
 
 ## Also to confirm
 
+- Mistake detection fields: `car.collidedWith` / `car.collisionDepth` (wall and car contact) and `car.wheelsOutside` (track limits), read in `telemetry.sample`. The detector only trusts contact when speed really drops, and ignores a field that's on for most of a run, so a wrong guess can't exclude every run. Hit a wall once and run off track once with logging on, and check the `collided` and `offTrack` columns in the CSV.
+
+- Input device detection: the app reads `INPUT_METHOD` from `Documents/Assetto Corsa/cfg/controls.ini` (`WHEEL`, `X360`, `KEYBOARD`), in `cardata.inputDevice`. Diagnostics shows the raw value. Check it with a wheel and with a controller, and note any other values (for example from Content Manager presets) that need mapping.
+
 - Minimum CSP build: find the oldest build with every API above, then set `MIN_VERSION_CODE` in `compat.lua` and `REQUIRED_VERSION` in `manifest.ini` (both 2651 for now, a placeholder).
 - HUD window flags (`NO_BACKGROUND, NO_TITLE_BAR`) and `LAZY = NONE` in `manifest.ini`.
 - `ROD_LENGTH` direction (assumed: higher value = higher ride height) and `PACKER_RANGE` units (assumed metres) for the bottoming metric.

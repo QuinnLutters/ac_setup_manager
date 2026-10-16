@@ -8,7 +8,8 @@ local M = {}
 local WHEELS = { 'FL', 'FR', 'RL', 'RR' }
 M.WHEELS = WHEELS
 
-M.COLUMNS = { 't', 'speed', 'slip', 'yawRate', 'steer', 'steerDeg', 'throttle', 'brake', 'handbrake', 'clutch', 'gear', 'rpm' }
+M.COLUMNS = { 't', 'speed', 'slip', 'yawRate', 'steer', 'steerDeg', 'throttle', 'brake', 'handbrake', 'clutch', 'gear', 'rpm',
+  'collided', 'offTrack' }
 for _, prefix in ipairs({ 'slipAngle', 'slipRatio', 'ndSlip', 'load', 'temp', 'pressure', 'susp' }) do
   for _, w in ipairs(WHEELS) do M.COLUMNS[#M.COLUMNS + 1] = prefix .. w end
 end
@@ -51,6 +52,6 @@ end
 M.SUMMARY_COLUMNS = { 'run', 'version', 'endReason', 'totalTime', 'driftTime', 'segments', 'avgAngle',
   'maxAngle', 'angleStd', 'avgDriftSpeed', 'spinScore', 'straightenRatio', 'failedEntryRatio', 'wheelspinRatio',
   'lowRpmRatio', 'frontWashRatio', 'lockLimitRatio', 'transitionYawAccel', 'bottomingRatio',
-  'pressureWorstDelta', 'feedback', 'topSymptom' }
+  'pressureWorstDelta', 'feedback', 'mistakes', 'topSymptom' }
 
 return M

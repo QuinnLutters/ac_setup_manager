@@ -1,5 +1,6 @@
--- F6: turns a diagnosis into exactly one setup change, clamped to the car's
--- MIN/MAX/STEP. Left and right items of a lever move together as a pair.
+-- F6: turns a diagnosis into setup changes, clamped to the car's MIN/MAX/STEP.
+-- One suggested fix per problem; the driver ticks which ones go into the next
+-- version. Left and right items of a lever move together as a pair.
 
 local util = require('src/core/util')
 local catalog = require('src/core/catalog')
@@ -123,59 +124,111 @@ function M.describe(plan)
     plan.paired and ', left and right' or ''), first
 end
 
--- history: optional { lastChange = { lever, direction, verdict }, isBlocked = function(lever, direction) }
+-- history: optional { lastChanges = { { lever, direction, verdict } }, isBlocked = function(lever, direction) }
 -- Returns one of:
---   { kind = 'change', symptom, plan, why, feel, glossary, blocked = {...}, limited = {...} }
+--   { kind = 'changes', options = {...}, limited = {...} }
+--       Every fix worth making after this run. Each option is
+--       { id, symptom, plan, summary, why, feel, glossary, primary, checked, alsoFor, conflict }.
+--       The first workable fix per problem is `primary` and starts checked; other
+--       workable fixes are listed unchecked as alternatives. Two options never move
+--       the same setting when checked together (see M.toggle).
 --   { kind = 'advice', limited = {...} }   every fired symptom is out of levers on this car
 --   { kind = 'done' }                       driver said "felt good" and nothing fired
 --   { kind = 'none' }                       nothing fired, no feedback
 function M.recommend(rules, diagnosisList, leverGroups, opts)
   opts = opts or {}
   local history, metrics, profile = opts.history, opts.metrics or {}, opts.profile
-  local limited = {}
+  local limited, options = {}, {}
+  local byLever = {}          -- lever -> option already listed for it
   local anyFired = false
+
+  local function lastFor(lever)
+    for _, c in ipairs(history and history.lastChanges or {}) do
+      if c.lever == lever then return c end
+    end
+  end
 
   for _, s in ipairs(diagnosisList) do
     if s.fired then
       anyFired = true
-      local blocked = {}
+      local blocked, found = {}, 0
       for _, change in ipairs(s.rule.changes or {}) do
         if conditionsHold(change.when, metrics, profile) then
           local skip
           if history and history.isBlocked and history.isBlocked(change.lever, change.direction) then
             skip = 'reverted_before'
           end
-          local last = history and history.lastChange
-          if not skip and last and last.lever == change.lever and last.direction == -change.direction
-            and last.verdict ~= 'worse' then
+          local last = lastFor(change.lever)
+          if not skip and last and last.direction == -change.direction and last.verdict ~= 'worse' then
             skip = 'would_undo'
           end
           local plan, reason
           if not skip then plan, reason = M.planChange(rules, change, leverGroups, metrics) end
           reason = skip or reason
           if plan then
-            return {
-              kind = 'change',
-              symptom = s,
-              plan = plan,
-              summary = M.describe(plan),
-              why = s.rule.why,
-              feel = s.rule.feel,
-              glossary = s.rule.glossary,
-              blocked = blocked,
-              limited = limited,
-            }
+            found = found + 1
+            local existing = byLever[change.lever]
+            if existing and existing.plan.direction == plan.direction then
+              -- Same fix already suggested for a higher-priority problem.
+              existing.alsoFor[#existing.alsoFor + 1] = s.name
+            else
+              local opt = {
+                id = s.id .. ':' .. change.lever,
+                symptom = s,
+                plan = plan,
+                summary = M.describe(plan),
+                why = s.rule.why,
+                feel = s.rule.feel,
+                glossary = s.rule.glossary,
+                primary = found == 1,
+                alsoFor = {},
+                blocked = blocked,
+              }
+              if existing then
+                -- Opposite direction on a setting another problem already uses.
+                opt.conflict = existing.symptom.name
+              elseif opt.primary then
+                -- Only main fixes claim a setting; alternatives never block another problem's fix.
+                byLever[change.lever] = opt
+              end
+              opt.checked = opt.primary and not opt.conflict
+              options[#options + 1] = opt
+            end
+          else
+            blocked[#blocked + 1] = { lever = change.lever, reason = reason, text = M.reasonText(reason, change.lever) }
           end
-          blocked[#blocked + 1] = { lever = change.lever, reason = reason, text = M.reasonText(reason, change.lever) }
         end
       end
-      limited[#limited + 1] = { symptom = s, blocked = blocked, advice = s.rule.limitAdvice }
+      if found == 0 then
+        limited[#limited + 1] = { symptom = s, blocked = blocked, advice = s.rule.limitAdvice }
+      end
     end
   end
 
+  if #options > 0 then return { kind = 'changes', options = options, limited = limited } end
   if anyFired then return { kind = 'advice', limited = limited } end
   if opts.feedback and util.contains(opts.feedback, 'felt_good') then return { kind = 'done' } end
   return { kind = 'none' }
+end
+
+-- Ticks or unticks an option. Ticking one unticks any other option that moves
+-- the same setting, so a saved version never contains contradicting changes.
+function M.toggle(rec, id)
+  local target
+  for _, o in ipairs(rec.options or {}) do if o.id == id then target = o end end
+  if not target then return end
+  target.checked = not target.checked
+  if target.checked then
+    for _, o in ipairs(rec.options) do
+      if o ~= target and o.plan.lever == target.plan.lever then o.checked = false end
+    end
+  end
+end
+
+function M.checked(rec)
+  local out = {}
+  for _, o in ipairs(rec.options or {}) do if o.checked then out[#out + 1] = o end end
+  return out
 end
 
 return M

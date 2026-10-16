@@ -22,6 +22,12 @@
     "bottomingFraction": 0.97, "pressureMinRunTime": 30
   },
 
+  // Driver mistakes: runs with one are logged but don't count toward tuning.
+  "mistakes": {
+    "impactDecel": -80, "impactBrake": 0.5, "collisionDrop": 10,
+    "offTrackWheels": 4, "offTrackHold": 0.5, "countersteer": 0.5, "catchWindow": 1.0
+  },
+
   "confidence": {
     "telemetryWeight": 0.85,
     "feedbackWeight": 0.55,
@@ -57,10 +63,15 @@
     "goal": {
       "stability": { "spin": 1.15, "twitchy": 1.1, "bottoming": 1.05 },
       "angle":     { "straighten": 1.15, "out_of_lock": 1.15, "cant_start": 1.1 },
-      "speed":     { "bogs_down": 1.15, "wheelspin": 1.15, "front_washout": 1.05 }
+      "speed":     { "bogs_down": 1.15, "wheelspin": 1.15, "front_washout": 1.05 },
+      "entries":   { "cant_start": 1.25, "front_washout": 1.1 },
+      "transitions": { "twitchy": 1.25, "spin": 1.05 },
+      "consistency": { "pressure_front": 1.15, "pressure_rear": 1.15, "bottoming": 1.1, "twitchy": 1.1 },
+      "forgiving": { "spin": 1.2, "out_of_lock": 1.15, "twitchy": 1.1 }
     },
     "device": {
-      "controller": { "spin": 1.1, "twitchy": 1.1 }
+      "controller": { "spin": 1.1, "twitchy": 1.1 },
+      "keyboard":   { "spin": 1.15, "twitchy": 1.15 }
     },
     "experience": {
       "beginner": { "spin": 1.1, "cant_start": 1.1 }
@@ -184,6 +195,8 @@
       "feedback": ["spins_out"],
       // A spin caused by running out of lock is a lock problem, not a rear grip problem.
       "outranks": { "symptom": "spin", "minTelemetry": 0.6 },
+      // "Spins out" alone can't tell this from a rear-grip spin; needs steering data too.
+      "requiresTelemetry": true,
       "changes": [
         { "lever": "steer_lock", "direction": 1, "toFraction": 1.0 },
         { "lever": "toe_front", "direction": 1, "steps": 1, "maxFractionOfRange": 0.08 }
@@ -194,25 +207,38 @@
       "limitAdvice": "This car's steering lock and toe aren't adjustable in its setup, so this is a hardware limit of the car. Use slightly less angle, or pick a car or drift pack with more lock."
     },
     {
-      "id": "pressure_window",
-      "name": "Pressures out of window",
+      "id": "pressure_front",
+      "name": "Front pressures out of window",
       "group": "balance",
-      "metric": "pressureWorstAbs", "warn": 1.5, "full": 5.0,
+      "metric": "frontPressureAbs", "warn": 1.5, "full": 5.0,
       "feedback": [],
       "changes": [
-        { "lever": "pressure_front", "direction": -1, "stepsFromMetric": "pressureWorstAbs",
-          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "front" }, { "metric": "pressureWorstDelta", "op": ">", "value": 0 }] },
-        { "lever": "pressure_front", "direction": 1, "stepsFromMetric": "pressureWorstAbs",
-          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "front" }, { "metric": "pressureWorstDelta", "op": "<", "value": 0 }] },
-        { "lever": "pressure_rear", "direction": -1, "stepsFromMetric": "pressureWorstAbs",
-          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "rear" }, { "metric": "pressureWorstDelta", "op": ">", "value": 0 }] },
-        { "lever": "pressure_rear", "direction": 1, "stepsFromMetric": "pressureWorstAbs",
-          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "rear" }, { "metric": "pressureWorstDelta", "op": "<", "value": 0 }] }
+        { "lever": "pressure_front", "direction": -1, "stepsFromMetric": "frontPressureAbs",
+          "when": [{ "metric": "frontPressureDelta", "op": ">", "value": 0 }] },
+        { "lever": "pressure_front", "direction": 1, "stepsFromMetric": "frontPressureAbs",
+          "when": [{ "metric": "frontPressureDelta", "op": "<", "value": 0 }] }
       ],
-      "why": "Tyres work best inside their pressure window. Moving the cold pressure brings the hot pressure back towards the target.",
-      "feel": "Grip should feel more consistent from the start to the end of a run.",
+      "why": "Tyres work best inside their pressure window. Moving the cold front pressure brings the hot pressure back towards the target.",
+      "feel": "Front grip should feel more consistent from the start to the end of a run.",
       "glossary": "pressure_window",
-      "limitAdvice": "This car's pressures are already at their limit. Keep runs a similar length so the tyres reach the same temperature."
+      "limitAdvice": "This car's front pressures are already at their limit. Keep runs a similar length so the tyres reach the same temperature."
+    },
+    {
+      "id": "pressure_rear",
+      "name": "Rear pressures out of window",
+      "group": "balance",
+      "metric": "rearPressureAbs", "warn": 1.5, "full": 5.0,
+      "feedback": [],
+      "changes": [
+        { "lever": "pressure_rear", "direction": -1, "stepsFromMetric": "rearPressureAbs",
+          "when": [{ "metric": "rearPressureDelta", "op": ">", "value": 0 }] },
+        { "lever": "pressure_rear", "direction": 1, "stepsFromMetric": "rearPressureAbs",
+          "when": [{ "metric": "rearPressureDelta", "op": "<", "value": 0 }] }
+      ],
+      "why": "Tyres work best inside their pressure window. Moving the cold rear pressure brings the hot pressure back towards the target.",
+      "feel": "Rear grip should feel more consistent from the start to the end of a run.",
+      "glossary": "pressure_window",
+      "limitAdvice": "This car's rear pressures are already at their limit. Keep runs a similar length so the tyres reach the same temperature."
     },
     {
       "id": "twitchy",

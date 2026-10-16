@@ -23,14 +23,15 @@ describe('CSV logs through the full pipeline', function()
     straighten = { 'straighten', 'arb_rear' },
     cant_start = { 'cant_start', 'diff_power' },
     wheelspin = { 'wheelspin', 'pressure_rear' },
-    hot_pressure = { 'pressure_window', 'pressure_rear' },
+    hot_pressure = { 'pressure_rear', 'pressure_rear' },
   }
   for name, e in pairs(expected) do
     it(name .. ' -> ' .. e[2], function()
       local r = run(name).recommendation
-      assert.equals('change', r.kind)
-      assert.equals(e[1], r.symptom.id)
-      assert.equals(e[2], r.plan.lever)
+      assert.equals('changes', r.kind)
+      local main = require('src/core/recommend').checked(r)[1]
+      assert.equals(e[1], main.symptom.id)
+      assert.equals(e[2], main.plan.lever)
     end)
   end
 

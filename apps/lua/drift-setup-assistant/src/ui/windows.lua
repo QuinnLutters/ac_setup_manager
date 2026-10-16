@@ -78,6 +78,9 @@ function M.settings(app, dt)
     { 'Rev limiter', d.ctx and d.ctx.rpmLimiter and tostring(d.ctx.rpmLimiter) or 'unknown' },
     { 'Ideal pressures', d.ctx and d.ctx.idealPressure and string.format('%s / %s', d.ctx.idealPressure.front, d.ctx.idealPressure.rear) or 'unknown' },
     { 'Bottoming limit', d.ctx and d.ctx.suspMaxTravel and 'from suspensions.ini' or 'unknown' },
+    { 'Input device', d.inputDevice and (d.inputDevice .. ' (controls.ini: ' .. tostring(d.inputDeviceRaw) .. ')')
+      or ('not detected' .. (d.inputDeviceRaw and (' (controls.ini: ' .. d.inputDeviceRaw .. ')') or '') .. ', asked instead'),
+      d.inputDevice and K.C.good or K.C.warn },
     { 'Online (read-only)', tostring(d.readOnly) },
   }, 170)
   if d.probe then

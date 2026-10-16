@@ -80,6 +80,22 @@ function M.readSetupFile(path)
   return ini.parse(text)
 end
 
+-- AC stores the driver's chosen input method in cfg/controls.ini:
+-- [HEADER] INPUT_METHOD=WHEEL | X360 | KEYBOARD. Returns 'wheel', 'controller',
+-- 'keyboard' or nil when it can't tell, plus the raw value for diagnostics.
+function M.inputDevice()
+  local dir = compat.cfgDir()
+  local text = dir and compat.load(dir .. '/controls.ini')
+  if not text then return nil end
+  local raw = ini.get(ini.parse(text), 'HEADER', 'INPUT_METHOD')
+  if not raw then return nil end
+  local up = raw:upper()
+  if up == 'WHEEL' then return 'wheel', raw end
+  if up == 'X360' or up:find('PAD') or up:find('CONTROLLER') then return 'controller', raw end
+  if up == 'KEYBOARD' then return 'keyboard', raw end
+  return nil, raw
+end
+
 -- The setup the car is running right now, if the CSP build can tell us.
 function M.currentSetup()
   local cfg, via = compat.currentSetup()

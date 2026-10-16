@@ -91,7 +91,7 @@ describe('F12 history and revert', function()
     history.setActive(h, 2)
     history.addRun(h, 2, { spinScore = 1 }, { 'spins_out' }, 4)
     assert.equals(1, #history.metricsFor(h, 2))
-    assert.same({ lever = 'pressure_rear', direction = -1 }, history.lastChange(h))
+    assert.same({ { lever = 'pressure_rear', direction = -1 } }, history.lastChanges(h))
 
     history.revert(h, 0)
     assert.equals(0, h.activeN)
@@ -134,5 +134,57 @@ describe('F10 starter baseline', function()
     local l = items.levers(items.build(p, {}))
     local v = baseline.values(baseline.generate(rules, l))
     assert.is_true(v.PRESSURE_LR > v.PRESSURE_LF or v.PRESSURE_LR == 20)
+  end)
+end)
+
+describe('multi-change versions and the start of a session', function()
+  local rules = fx.rules()
+  local function rule(id) for _, s in ipairs(rules.symptoms) do if s.id == id then return s end end end
+
+  it('compares a version that fixed several problems', function()
+    local before = { { spinScore = 1, rearPressureAbs = 4 }, { spinScore = 0.8, rearPressureAbs = 4.4 } }
+    local after = { { spinScore = 0.1, rearPressureAbs = 1 }, { spinScore = 0, rearPressureAbs = 0.6 } }
+    local r = compare.compare(rules, before, after, { rule('spin'), rule('pressure_rear') })
+    assert.equals('helped', r.verdict)
+    assert.equals(2, #r.primaries)
+    assert.matches('The changes helped', r.text)
+  end)
+
+  it('averages several runs, numbers by mean and labels by majority', function()
+    local m = require('src/core/metrics').aggregate({
+      { spinScore = 1, bottomingAxle = 'rear' }, { spinScore = 0.5, bottomingAxle = 'rear' },
+      { spinScore = 0, bottomingAxle = 'front' } })
+    assert.equals(0.5, m.spinScore)
+    assert.equals('rear', m.bottomingAxle)
+  end)
+
+  it('reads versions saved before multi-change support', function()
+    local v = { n = 1, change = { lever = 'arb_rear', direction = -1 }, symptomId = 'spin' }
+    local list = history.changesOf(v)
+    assert.equals(1, #list)
+    assert.equals('spin', list[1].symptomId)
+  end)
+
+  it('counts starting runs, leaving out mistakes', function()
+    local h = history.new('car', 'track')
+    history.addBase(h, 'mine.ini', { X = 1 }, 1)
+    history.setActive(h, 0)
+    history.setStart(h, 'own', 0, 3)
+    history.addRun(h, 0, {}, {}, 1)
+    history.addRun(h, 0, {}, {}, 2, { excluded = true })
+    local count, needed = history.calibration(h)
+    assert.equals(1, count)
+    assert.equals(3, needed)
+    assert.equals(2, #history.runsFor(h, 0, true))
+  end)
+
+  it('skips the start choice for histories that were already tuning', function()
+    local h = history.new('car', 'track')
+    history.addBase(h, 'mine.ini', { X = 1 }, 1)
+    history.addVersion(h, { n = 1, parent = 0, kind = 'change' }, 2)
+    history.migrate(h)
+    assert.is_true(h.calibrated)
+    local fresh = history.migrate(history.new('car', 'track'))
+    assert.is_nil(fresh.start)
   end)
 end)

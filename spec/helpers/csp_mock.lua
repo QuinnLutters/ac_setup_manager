@@ -73,6 +73,12 @@ function M.install(opts)
     write(state.setupsDir .. '/test_drift/test_track/my_setup.ini', current)
   end
 
+  -- The input method AC writes to Documents/Assetto Corsa/cfg/controls.ini.
+  if opts.inputMethod ~= false then
+    sh('mkdir -p ' .. q(root .. '/docs/cfg'))
+    write(root .. '/docs/cfg/controls.ini', '[HEADER]\nINPUT_METHOD=' .. (opts.inputMethod or 'WHEEL') .. '\n')
+  end
+
   _G.__dirname = state.appDir
   _G.script = {}
 
@@ -115,7 +121,14 @@ function M.install(opts)
     getTrackID = function() return 'test_track' end,
     log = function(msg) state.logs[#state.logs + 1] = msg end,
     debug = function() end,
-    storage = function(defaults) local t = {}; for k, v in pairs(defaults) do t[k] = v end; return t end,
+    -- Persists for the whole install, like ac.storage across sessions.
+    storage = function(defaults)
+      if not state.storage then
+        state.storage = {}
+        for k, v in pairs(defaults) do state.storage[k] = v end
+      end
+      return state.storage
+    end,
     getCar = function()
       local s = state.sample
       local v = s.speed / 3.6

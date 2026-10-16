@@ -110,10 +110,11 @@ function M.history(app)
     local active = h.activeN == v.n
     K.colored(string.format('%s  %s%s', v.n == 0 and 'Base' or ('v' .. v.n), v.file or 'current setup',
       active and '  · driving now' or ''), active and K.C.accent or K.C.text)
-    local line = KIND_LABELS[v.kind] or v.kind
-    if v.change then line = line .. ': ' .. (v.change.summary or v.change.label) end
-    if v.symptomName then line = line .. ' (for: ' .. v.symptomName .. ')' end
-    K.small(line)
+    local changes = history.changesOf(v)
+    K.small((KIND_LABELS[v.kind] or v.kind) .. (#changes > 1 and string.format(' (%d changes)', #changes) or ''))
+    for _, c in ipairs(changes) do
+      K.small('• ' .. (c.summary or c.label) .. (c.symptomName and (' (for: ' .. c.symptomName .. ')') or ''))
+    end
     local runs = #history.runsFor(h, v.n)
     local verdict = v.verdict and VERDICTS[v.verdict]
     K.small(string.format('%d run%s', runs, runs == 1 and '' or 's'))

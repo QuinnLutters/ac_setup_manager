@@ -65,6 +65,16 @@ local function feedbackPrompt(app)
     { 'Average angle', fmtMetric(m.avgAngle, '°') },
     { 'Max angle', fmtMetric(m.maxAngle, '°') },
   }, 130)
+  K.gap(6)
+  -- Driver mistakes: say what was seen and let the driver overrule it.
+  if lr.excluded then
+    for _, x in ipairs(lr.mistakes or {}) do K.bullet(x.text, K.C.warn) end
+    if #(lr.mistakes or {}) == 0 then K.bullet('You marked this run as your mistake.', K.C.warn) end
+    K.wrap('This run won\'t count toward setup changes, because the problem was the driving, not the car.', K.C.warn)
+    if K.button('Count it anyway', 150) then app:setRunExcluded(false) end
+  else
+    if K.button('My mistake, don\'t count this run', 260) then app:setRunExcluded(true) end
+  end
   K.gap(8)
   K.colored('How did the car feel?', K.C.text)
   local opts = app:feedbackOptions()
@@ -84,10 +94,12 @@ local function compareBlock(app, cmp)
   if not cmp or cmp.verdict == 'not_enough' then return end
   local v = cmp.version
   K.heading(string.format('Did v%d help?', v.n))
-  if v.change then K.small('Change: ' .. (v.change.summary or v.change.label)) end
+  for _, c in ipairs(history.changesOf(v)) do K.small('Change: ' .. (c.summary or c.label)) end
   K.wrap(cmp.text, K.C[VERDICT_COLORS[cmp.verdict]])
-  if cmp.primary and cmp.primary.before then
-    K.table({ { cmp.primary.label, string.format('%s → %s', fmtMetric(cmp.primary.before, nil), fmtMetric(cmp.primary.after, nil)) } }, 200)
+  for _, p in ipairs(cmp.primaries or {}) do
+    if p.before then
+      K.table({ { p.label, string.format('%s → %s', fmtMetric(p.before, nil), fmtMetric(p.after, nil)) } }, 200)
+    end
   end
   for _, r in ipairs(cmp.rows) do
     local col = r.same and K.C.muted or (r.better and K.C.good or K.C.bad)
@@ -103,19 +115,42 @@ local function compareBlock(app, cmp)
   K.sep()
 end
 
-local function glossaryLink(app, id)
+local function glossaryLink(app, id, key)
   local term = glossary.get(id)
   if not term then return end
   K.colored('Term: ' .. term.term, K.C.info)
   K.muted(term.short)
-  if K.button('Learn more about ' .. term.term:lower(), 0) then
+  if K.button('Learn more about ' .. term.term:lower() .. '##' .. (key or id), 0) then
     app.learnTerm = id
     app.tab = 'learn'
   end
 end
 
-local function explainPanel(app, rec)
-  local s = rec.symptom
+-- One suggested fix: checkbox, what changes, why, what to feel (F7).
+local function optionPanel(app, o)
+  local label = o.summary .. '##' .. o.id
+  if ui.checkbox(label, o.checked) then app:toggleOption(o.id) end
+  local s = o.symptom
+  local tag = o.primary and '' or 'Alternative · '
+  K.small(string.format('%sFor: %s · confidence %s%s', tag, s.name, K.pct(s.confidence),
+    s.confirmed and ', confirmed by you' or ''))
+  if #o.alsoFor > 0 then K.small('Also helps: ' .. table.concat(o.alsoFor, ', ')) end
+  if o.conflict then K.small('Moves the same setting the other way to the fix for ' .. o.conflict .. '. Pick one.') end
+  if o.primary then
+    for _, b in ipairs(o.blocked or {}) do K.small(b.text .. ' So this is the next-best fix.') end
+  end
+  for _, r in ipairs(o.plan.items) do
+    if r.moved then K.bullet(string.format('%s: %s → %s', r.label, r.fromDisplay, r.toDisplay)) end
+  end
+  K.colored('Why it helps', K.C.text)
+  K.wrap(o.why)
+  K.colored('What to feel on the next run', K.C.text)
+  K.wrap(o.feel)
+  glossaryLink(app, o.glossary, o.id)
+  K.gap(8)
+end
+
+local function changesPanel(app, rec)
   for _, l in ipairs(rec.limited or {}) do
     K.colored('Can\'t fix "' .. l.symptom.name .. '" with this car\'s setup', K.C.warn)
     for _, b in ipairs(l.blocked) do K.bullet(b.text, K.C.muted) end
@@ -123,93 +158,123 @@ local function explainPanel(app, rec)
     K.gap(4)
   end
 
-  K.heading(s.name)
-  K.small(string.format('Confidence %s%s', K.pct(s.confidence), s.confirmed and ' · confirmed by you' or ' · from telemetry'))
-  K.bar(s.confidence, nil, 4, nil, K.C.accent)
-  K.gap(6)
-
-  if #rec.blocked > 0 then
-    for _, b in ipairs(rec.blocked) do K.bullet(b.text, K.C.muted) end
-    K.muted('So the app picked the next-best change:')
+  K.heading('Suggested changes')
+  K.muted('Tick the changes you want in the next version. Main fixes are ticked for you; alternatives are optional.')
+  K.gap(4)
+  local count = 0
+  for _, o in ipairs(rec.options) do
+    optionPanel(app, o)
+    if o.checked then count = count + 1 end
   end
 
-  K.colored('What changes', K.C.text)
-  for _, r in ipairs(rec.plan.items) do
-    if r.moved then
-      K.bullet(string.format('%s: %s → %s', r.label, r.fromDisplay, r.toDisplay))
-    end
-  end
-  K.small(rec.plan.label .. ' ' .. rec.plan.directionLabel .. (rec.plan.paired and ', left and right together' or ''))
-  K.gap(4)
-  K.colored('Why it helps', K.C.text)
-  K.wrap(rec.why)
-  K.gap(4)
-  K.colored('What to feel on the next run', K.C.text)
-  K.wrap(rec.feel)
-  K.gap(4)
-  glossaryLink(app, rec.glossary)
-  K.gap(8)
-
+  local label = count == 1 and 'Save 1 change as new setup' or string.format('Save %d changes as new setup', count)
   if app.result.applied then
     K.colored('Saved as ' .. app.result.applied.file, K.C.good)
   else
     local ok, why = app:canWrite()
-    if ok then
-      if K.primary('Save as new setup', 200, 30) then app:applyRecommendation() end
+    if count == 0 then
+      K.disabledButton(label, 240, 30, 'Tick at least one change.')
+    elseif ok then
+      if K.primary(label, 240, 30) then app:applyChanges() end
     else
-      K.disabledButton('Save as new setup', 200, 30, why)
+      K.disabledButton(label, 240, 30, why)
       K.small(why)
     end
   end
 end
 
-local function otherSymptoms(result, shownId)
+local function otherSymptoms(result, shown)
   local others = {}
   for _, s in ipairs(result.diagnosis) do
-    if s.id ~= shownId and (s.fired or s.confidence >= 0.25) then others[#others + 1] = s end
+    if not shown[s.id] and not s.fired and s.confidence >= 0.25 then others[#others + 1] = s end
   end
   if #others == 0 then return end
   K.sep()
-  K.colored('Also noticed', K.C.muted)
+  K.colored('Watching, but below threshold', K.C.muted)
   for _, s in ipairs(others) do
-    K.text(s.name .. (s.fired and '' or ' (below threshold)'))
-    K.bar(s.confidence, 220, 4, nil, s.fired and K.C.warn or K.C.muted)
+    K.text(s.name)
+    K.bar(s.confidence, 220, 4, nil, K.C.muted)
   end
-  K.small('One change at a time: these are looked at again after your next run.')
+end
+
+local function calibratingView(app, r)
+  local h = app.history
+  if h.start and h.start.version ~= h.activeN then
+    local v = history.get(h, h.start.version)
+    K.heading('Load your starting setup first')
+    K.wrap(string.format('Runs only count once %s is loaded. Pits → Setup → Load.', v and v.file or 'the starting setup'), K.C.info)
+    return
+  end
+  K.heading(string.format('Starting runs: %d of %d', r.count, r.needed))
+  K.bar(r.count / r.needed, nil, 6, nil, K.C.accent)
+  K.wrap(string.format('Drive %d more run%s on this setup. After %d runs the app looks at all of them together and suggests the first changes.',
+    r.needed - r.count, r.needed - r.count == 1 and '' or 's', r.needed))
 end
 
 local function resultView(app)
   local r = app.result
-  compareBlock(app, r.compare)
-  local rec = r.recommendation
-  if rec.kind == 'change' then
-    explainPanel(app, rec)
-    otherSymptoms(r, rec.symptom.id)
-  elseif rec.kind == 'advice' then
-    for _, l in ipairs(rec.limited) do
-      K.heading(l.symptom.name)
-      K.small('Confidence ' .. K.pct(l.symptom.confidence))
-      for _, b in ipairs(l.blocked) do K.bullet(b.text, K.C.muted) end
-      K.wrap(l.advice or 'This car can\'t make the usual changes for this.')
-      glossaryLink(app, l.symptom.rule.glossary)
-      K.gap(6)
-    end
-  elseif rec.kind == 'done' then
-    K.heading('Your setup is dialled in')
-    local active = history.active(app.history)
-    K.wrap(string.format('You said the car felt good and no symptom is above its threshold. Your setup stays saved as %s.',
-      active and (active.file or 'your current setup') or 'your current setup'), K.C.good)
-    if active and active.n > 0 then
-      local ok = app:canWrite()
-      if ok and K.button('Also save a copy named "final"', 240) then app:saveFinalCopy() end
-    end
+  if r.kind == 'excluded' then
+    K.heading('This run doesn\'t count')
+    for _, x in ipairs(r.mistakes or {}) do K.bullet(x.text, K.C.warn) end
+    K.muted('It\'s saved in the log, but not used for setup changes or comparisons. Drive another run.')
+  elseif r.kind == 'calibrating' then
+    calibratingView(app, r)
   else
-    K.heading('No clear problem on this run')
-    K.muted('Keep driving. If something feels off, say so after the next run and the app will look at it.')
-    otherSymptoms(r, nil)
+    if r.evaluatedRuns and r.evaluatedRuns > 1 then
+      K.colored(string.format('First evaluation, based on your %d starting runs together.', r.evaluatedRuns), K.C.info)
+      K.gap(4)
+    end
+    compareBlock(app, r.compare)
+    local rec = r.recommendation
+    local shown = {}
+    if rec.kind == 'changes' then
+      for _, o in ipairs(rec.options) do shown[o.symptom.id] = true end
+      changesPanel(app, rec)
+      otherSymptoms(r, shown)
+    elseif rec.kind == 'advice' then
+      for _, l in ipairs(rec.limited) do
+        K.heading(l.symptom.name)
+        K.small('Confidence ' .. K.pct(l.symptom.confidence))
+        for _, b in ipairs(l.blocked) do K.bullet(b.text, K.C.muted) end
+        K.wrap(l.advice or 'This car can\'t make the usual changes for this.')
+        glossaryLink(app, l.symptom.rule.glossary)
+        K.gap(6)
+      end
+    elseif rec.kind == 'done' then
+      K.heading('Your setup is dialled in')
+      local active = history.active(app.history)
+      K.wrap(string.format('You said the car felt good and no symptom is above its threshold. Your setup stays saved as %s.',
+        active and (active.file or 'your current setup') or 'your current setup'), K.C.good)
+      if active and active.n > 0 then
+        local ok = app:canWrite()
+        if ok and K.button('Also save a copy named "final"', 240) then app:saveFinalCopy() end
+      end
+    else
+      K.heading('No clear problem on this run')
+      K.muted('Keep driving. If something feels off, say so after the next run and the app will look at it.')
+      otherSymptoms(r, shown)
+    end
   end
   K.gap(6)
   if K.button('Dismiss', 90) then app.phase = 'idle' end
+end
+
+-- New car/track: start from the drift baseline or from the driver's own setup.
+local function startChooser(app)
+  K.heading('How do you want to start?')
+  K.muted('Pick a starting point for this car and track. You\'ll drive 3 runs on it, then the app suggests the first changes.')
+  K.gap(4)
+  local ok, why = app:canWrite()
+  if ok then
+    if K.primary('Start from a drift baseline', 240, 28) then app:chooseStart('baseline') end
+    K.small('The app builds a drift-ready setup from this car\'s ranges. Load it in the pits first.')
+  else
+    K.disabledButton('Start from a drift baseline', 240, 28, why)
+  end
+  K.gap(4)
+  if K.button('Start from my current setup', 240, 28) then app:chooseStart('own') end
+  K.small('Keep the setup you have loaded now.')
+  K.sep()
 end
 
 local function baseChooser(app)
@@ -237,6 +302,8 @@ function M.draw(app)
   elseif not next(app:activeValues()) then
     baseChooser(app)
   end
+
+  if app:needsStartChoice() and #(app.items or {}) > 0 and next(app:activeValues()) then startChooser(app) end
 
   liveStatus(app)
   savedPanel(app)

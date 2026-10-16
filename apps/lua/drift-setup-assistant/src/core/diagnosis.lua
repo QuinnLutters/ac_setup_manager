@@ -51,6 +51,8 @@ function M.evaluate(rules, metrics, feedback, profile)
     c = c * profileFactor(rules, rule.id, profile)
     if feltGood then c = c * (1 - (conf.feltGoodDamping or 0.3)) end
     if rule.requiresFeedback and not confirmed then c = 0 end
+    -- For feedback shared with another symptom: the driver's word alone can't tell them apart.
+    if rule.requiresTelemetry and tele <= 0 then c = 0 end
     if not profileAllows(rule, profile) then c = 0 end
     c = util.clamp(c, 0, 1)
     out[#out + 1] = {

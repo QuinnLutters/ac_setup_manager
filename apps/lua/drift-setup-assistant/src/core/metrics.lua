@@ -244,6 +244,8 @@ function M.compute(run, ctx, cfg)
   if ideal and ideal.front and ideal.rear and pressureTime > 1 and m.totalTime >= c.pressureMinRunTime then
     m.frontPressureDelta = frontP / pressureTime - ideal.front
     m.rearPressureDelta = rearP / pressureTime - ideal.rear
+    m.frontPressureAbs = math.abs(m.frontPressureDelta)
+    m.rearPressureAbs = math.abs(m.rearPressureDelta)
     if math.abs(m.frontPressureDelta) >= math.abs(m.rearPressureDelta) then
       m.pressureWorstAxle, m.pressureWorstDelta = 'front', m.frontPressureDelta
     else
@@ -253,6 +255,30 @@ function M.compute(run, ctx, cfg)
   end
 
   return m
+end
+
+-- Averages the metrics of several runs (numbers by mean, labels by majority),
+-- so the first evaluation looks at all calibration runs together.
+function M.aggregate(list)
+  local sums, counts, labels = {}, {}, {}
+  for _, m in ipairs(list) do
+    for k, v in pairs(m) do
+      if type(v) == 'number' then
+        sums[k], counts[k] = (sums[k] or 0) + v, (counts[k] or 0) + 1
+      elseif type(v) == 'string' then
+        labels[k] = labels[k] or {}
+        labels[k][v] = (labels[k][v] or 0) + 1
+      end
+    end
+  end
+  local out = {}
+  for k, total in pairs(sums) do out[k] = total / counts[k] end
+  for k, votes in pairs(labels) do
+    local best, n = nil, -1
+    for v, c in pairs(votes) do if c > n or (c == n and v < best) then best, n = v, c end end
+    out[k] = best
+  end
+  return out
 end
 
 function M.failedEntries(run, c)

@@ -118,20 +118,27 @@ function M.appDir()
 end
 
 -- SPIKE: confirm which FolderID points at Documents/Assetto Corsa/setups.
-function M.setupsDir()
+-- A folder inside Documents/Assetto Corsa ('setups', 'cfg'). FolderID.Documents
+-- may already point at Documents/Assetto Corsa or at Documents itself.
+local function userDir(sub, specificId)
   if not ac.getFolder or not ac.FolderID then return nil end
   local candidates = {}
-  if ac.FolderID.UserSetups then candidates[#candidates + 1] = ac.getFolder(ac.FolderID.UserSetups) end
+  if specificId and ac.FolderID[specificId] then candidates[#candidates + 1] = ac.getFolder(ac.FolderID[specificId]) end
   if ac.FolderID.Documents then
     local docs = ac.getFolder(ac.FolderID.Documents)
-    candidates[#candidates + 1] = docs .. '/setups'
-    candidates[#candidates + 1] = docs .. '/Assetto Corsa/setups'
+    candidates[#candidates + 1] = docs .. '/' .. sub
+    candidates[#candidates + 1] = docs .. '/Assetto Corsa/' .. sub
   end
   for _, dir in ipairs(candidates) do
     if dir and M.dirExists(dir) then return dir end
   end
   return candidates[1]
 end
+
+function M.setupsDir() return userDir('setups', 'UserSetups') end
+
+-- SPIKE: confirm controls.ini lives here on a real install.
+function M.cfgDir() return userDir('cfg', 'Cfg') end
 
 function M.now()
   local ok, t = pcall(os.time)

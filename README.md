@@ -15,14 +15,16 @@ For the original Assetto Corsa (AC1) with Custom Shaders Patch. Works with a whe
 
 ## How to use it
 
-1. **Answer four questions** the first time (experience, wheel or controller, solo/lead/chase, what you want from the car).
-2. **Drive.** Recording starts by itself when you start drifting. A run ends when you spin, stop, or go 60 s without drifting.
-3. **Tap how the car felt** (spins out, straightens up, can't start a drift, bogs down, twitchy, felt good), or skip.
-4. **Read the recommendation.** It shows what changes, why it helps, what to feel on the next run, and the glossary term behind it.
-5. **Save as new setup.** The app writes `DSA_<car>_v<n>.ini` next to your setups. It never overwrites your own files.
-6. **Load it in the pits** (Setup → Load → pick the file) and drive again. After the next run the app compares before and after and offers to revert if it got worse.
+1. **Answer three questions** the first time: your experience, how you drift (solo, lead or chase), and what you want from the car (more angle, stability or speed, easier entries, smoother transitions, more consistency, or more forgiving). The app reads your input device (wheel, controller or keyboard) from Assetto Corsa's own controls settings, so it doesn't ask. It only asks if it can't read them.
+2. **Pick a starting point** for each new car and track: a drift baseline the app builds from the car's own ranges, or the setup you have loaded now.
+3. **Drive 3 runs** on that starting setup. Recording starts by itself when you start drifting. A run ends when you spin, stop, or go 60 s without drifting. After each run, tap how the car felt or skip.
+4. **Get the first changes.** The app looks at all 3 runs together and suggests fixes, one per problem it found, each with a checkbox. The main fixes are ticked for you; alternatives are listed unticked. Each one says what changes, why it helps, what to feel on the next run, and the glossary term behind it. Two ticked changes never move the same setting.
+5. **Save as new setup.** Every ticked change goes into one new file, `DSA_<car>_v<n>.ini`, next to your setups. It never overwrites your own files.
+6. **Load it in the pits** (Setup → Load → pick the file) and drive again. From then on you get an update after every run: the app compares before and after, offers to revert if it got worse, and suggests the next changes.
 
-The loop ends when you say it felt good and nothing is flagged. The **Setup** tab lists everything the car exposes and can generate a starter drift baseline. **History** shows every version with one-click revert. **Learn** is the glossary.
+**Driver mistakes don't count.** If you hit a wall, put all four wheels off track, or spin without trying to catch it, the app says so after the run. The run is still logged, but it isn't used for setup changes or before/after comparisons. You can overrule it with "Count it anyway", or mark a clean-looking run with "My mistake".
+
+The loop ends when you say it felt good and nothing is flagged. The **Setup** tab lists everything the car exposes and can also generate the drift baseline on its own. **History** shows every version and its changes, with one-click revert. **Learn** is the glossary.
 
 On online servers the app runs read-only: it diagnoses and explains, but doesn't write setups.
 
@@ -69,8 +71,8 @@ luarocks --lua-dir="$(brew --prefix luajit)" --lua-version=5.1 install --local b
 
 ## Status
 
-Built: F1–F9 (MVP) plus F10 starter baseline, F11 glossary with diagrams, and F12 history and revert. 106 tests pass.
+Built: F1–F9 (MVP) plus F10 starter baseline, F11 glossary with diagrams, and F12 history and revert. After the first playtests: several changes per version (ticked by the driver), a 3-run start, driver-mistake detection and four more goals. This deliberately relaxes the brief's F6 rule of one change at a time. 129 tests pass.
 
 **Not yet verified in game.** Development happened on macOS, where AC doesn't run. Every CSP-specific call is feature-checked and listed in [docs/SPIKE.md](docs/SPIKE.md), with a Diagnostics panel in the app's settings window to confirm them on a Windows PC.
 
-Open questions from the brief that still need a decision: minimum CSP version (placeholder build 2651 in `manifest.ini` and `src/game/compat.lua`), whether controllers are officially supported (the app works with either today), where to release, and the final name.
+Open questions from the brief that still need a decision: minimum CSP version (placeholder build 2651 in `manifest.ini` and `src/game/compat.lua`), whether controllers are officially supported (the app detects the device and works with wheel, controller or keyboard today), where to release, and the final name.

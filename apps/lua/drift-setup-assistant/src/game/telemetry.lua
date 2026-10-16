@@ -12,7 +12,7 @@ local WHEELS = { 'FL', 'FR', 'RL', 'RR' }
 
 M.CAR_FIELDS = { 'speedKmh', 'velocity', 'localVelocity', 'look', 'side', 'up', 'localAngularVelocity',
   'angularVelocity', 'steer', 'steerLock', 'gas', 'brake', 'handbrake', 'clutch', 'gear', 'rpm', 'rpmLimiter',
-  'position', 'isInPitlane', 'isInPit', 'wheels' }
+  'position', 'isInPitlane', 'isInPit', 'wheels', 'collidedWith', 'collisionDepth', 'wheelsOutside' }
 
 -- Per-wheel: our column prefix -> candidate CSP field names, first match wins.
 M.WHEEL_FIELDS = {
@@ -110,6 +110,11 @@ function M.sample(car, t, state)
     gear = compat.num(car, 'gear') or 0,
     rpm = compat.num(car, 'rpm') or 0,
   }
+  -- SPIKE: collision and track-limit fields. The mistake detector only trusts
+  -- them alongside real speed loss, and ignores a field that's always on.
+  local with, depth = compat.num(car, 'collidedWith'), compat.num(car, 'collisionDepth')
+  s.collided = ((with and with >= 0) or (depth and depth > 0)) and 1 or 0
+  s.offTrack = compat.num(car, 'wheelsOutside')
   for i = 0, 3 do
     local w = wheel(car, i)
     if w then
