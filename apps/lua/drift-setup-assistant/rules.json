@@ -1,0 +1,263 @@
+// Drift Setup Assistant rules. Thresholds are starting values to tune during
+// playtests, not fixed facts. // comments are allowed in this file.
+//
+// Each symptom: telemetry `metric` ramps from `warn` (score 0) to `full` (score 1).
+// Confidence = 1 - (1 - telemetryWeight * score) * (1 - feedbackWeight * feedbackMatch),
+// then scaled by profile modifiers. A symptom fires at `threshold`.
+// `changes` are tried in order; the first one the car can make wins.
+// Lever directions are semantic: +1 = stiffer / higher / more lock / shorter / more front.
+{
+  "version": 1,
+
+  "detection": {
+    "enterAngle": 15, "exitAngle": 8, "minSpeed": 20, "enterHold": 0.25, "exitHold": 0.4,
+    "spinAngle": 85, "stopSpeed": 5, "stopHold": 2.0, "noDriftTimeout": 60, "preRoll": 2.0,
+    "minDriftTime": 1.5, "sampleRate": 25
+  },
+
+  "metrics": {
+    "countersteer": 0.5, "snapRate": 80, "straightenThrottle": 0.7, "straightenRate": -10,
+    "wheelspinThrottle": 0.8, "wheelspinSlipRatio": 0.4, "wheelspinDecel": -1.5,
+    "powerBandLow": 0.55, "frontPeakSlipDeg": 9, "lockFraction": 0.95, "transitionGap": 1.5,
+    "bottomingFraction": 0.97, "pressureMinRunTime": 30
+  },
+
+  "confidence": {
+    "telemetryWeight": 0.85,
+    "feedbackWeight": 0.55,
+    "feltGoodDamping": 0.3,
+    "defaultThreshold": 0.5
+  },
+
+  "groups": ["safety", "balance", "fine"],
+
+  "change": {
+    // Make every change big enough to feel, but not so big it overshoots.
+    "minFractionOfRange": 0.05,
+    "maxFractionOfRange": 0.2
+  },
+
+  "compare": {
+    "runs": 3,
+    "helpedImprovement": 0.15,
+    "worseImprovement": -0.15
+  },
+
+  "feedbackOptions": [
+    { "id": "spins_out",       "label": "Spins out" },
+    { "id": "straightens_up",  "label": "Straightens up" },
+    { "id": "cant_start",      "label": "Can't start a drift" },
+    { "id": "bogs_down",       "label": "Bogs down" },
+    { "id": "twitchy",         "label": "Twitchy" },
+    { "id": "felt_good",       "label": "Felt good" },
+    { "id": "lost_angle_braking", "label": "Lost angle on the brake", "profile": { "style": "chase" } }
+  ],
+
+  "profileModifiers": {
+    "goal": {
+      "stability": { "spin": 1.15, "twitchy": 1.1, "bottoming": 1.05 },
+      "angle":     { "straighten": 1.15, "out_of_lock": 1.15, "cant_start": 1.1 },
+      "speed":     { "bogs_down": 1.15, "wheelspin": 1.15, "front_washout": 1.05 }
+    },
+    "device": {
+      "controller": { "spin": 1.1, "twitchy": 1.1 }
+    },
+    "experience": {
+      "beginner": { "spin": 1.1, "cant_start": 1.1 }
+    }
+  },
+
+  "symptoms": [
+    {
+      "id": "spin",
+      "name": "Spins out or snaps",
+      "group": "safety",
+      "metric": "spinScore", "warn": 0.2, "full": 1.0,
+      "feedback": ["spins_out"],
+      "changes": [
+        { "lever": "arb_rear", "direction": -1 },
+        { "lever": "pressure_rear", "direction": -1 }
+      ],
+      "why": "Adds side bite, so the rear holds the slide instead of letting go.",
+      "feel": "The rear should feel more planted at big angle. When you add throttle at opposite lock it should keep sliding instead of snapping around.",
+      "glossary": "side_bite",
+      "limitAdvice": "This car can't soften the rear or drop rear pressure any further. Try feeding throttle in more gradually at opposite lock, and catch the slide earlier."
+    },
+    {
+      "id": "bottoming",
+      "name": "Bottoming or bouncing",
+      "group": "safety",
+      "metric": "bottomingRatio", "warn": 0.01, "full": 0.08,
+      "feedback": [],
+      "changes": [
+        { "lever": "spring_rear", "direction": 1, "when": [{ "metric": "bottomingAxle", "op": "==", "value": "rear" }] },
+        { "lever": "ride_height_rear", "direction": 1, "when": [{ "metric": "bottomingAxle", "op": "==", "value": "rear" }] },
+        { "lever": "spring_front", "direction": 1, "when": [{ "metric": "bottomingAxle", "op": "==", "value": "front" }] },
+        { "lever": "ride_height_front", "direction": 1, "when": [{ "metric": "bottomingAxle", "op": "==", "value": "front" }] }
+      ],
+      "why": "Keeps the tyres loaded and predictable, because the suspension stops hitting the end of its travel.",
+      "feel": "Fewer sudden jolts over kerbs and compressions, and the car should react the same way every time.",
+      "glossary": "suspension_travel",
+      "limitAdvice": "This car's springs and ride height are already at their limit. Avoid the biggest kerbs and bumps mid-drift."
+    },
+    {
+      "id": "straighten",
+      "name": "Straightens up mid-drift",
+      "group": "balance",
+      "metric": "straightenRatio", "warn": 0.25, "full": 0.75,
+      "feedback": ["straightens_up"],
+      "changes": [
+        { "lever": "arb_rear", "direction": 1 },
+        { "lever": "pressure_rear", "direction": 1 }
+      ],
+      "why": "Less rear side grip, so the car keeps its angle.",
+      "feel": "The car should hold angle on throttle instead of pulling itself straight. Expect it to be a little less forgiving if you over-rotate.",
+      "glossary": "side_bite",
+      "limitAdvice": "This car can't reduce rear grip further with setup. Keep the throttle pinned and use a little more steering input to hold angle."
+    },
+    {
+      "id": "cant_start",
+      "name": "Can't start a drift",
+      "group": "balance",
+      "metric": "failedEntryRatio", "warn": 0.3, "full": 0.8,
+      "feedback": ["cant_start"],
+      "changes": [
+        { "lever": "diff_power", "direction": 1 },
+        { "lever": "diff_coast", "direction": 1 },
+        { "lever": "arb_rear", "direction": 1 }
+      ],
+      "why": "The rear breaks traction more easily, so a flick or clutch kick turns into a slide.",
+      "feel": "The rear should step out with less effort: a smaller flick, clutch kick or handbrake pull should be enough.",
+      "glossary": "lsd",
+      "limitAdvice": "This car's diff and rear bar are maxed out. Try a bigger weight transfer: brake, flick away then into the corner, and clutch kick."
+    },
+    {
+      "id": "wheelspin",
+      "name": "Wheelspin without drive",
+      "group": "balance",
+      "metric": "wheelspinRatio", "warn": 0.15, "full": 0.5,
+      "feedback": ["bogs_down"],
+      "changes": [
+        { "lever": "pressure_rear", "direction": -1 },
+        { "lever": "spring_rear", "direction": -1 },
+        { "lever": "final_drive", "direction": 1 }
+      ],
+      "why": "Adds forward bite, so wheelspin turns into forward speed.",
+      "feel": "The car should push forward through the drift instead of losing speed with the rears spinning.",
+      "glossary": "forward_bite",
+      "limitAdvice": "This car can't add more rear traction with setup. Short-shift or ease off slightly so the rears hook up."
+    },
+    {
+      "id": "bogs_down",
+      "name": "Bogs down",
+      "group": "balance",
+      "metric": "lowRpmRatio", "warn": 0.2, "full": 0.6,
+      "feedback": ["bogs_down"],
+      "changes": [
+        { "lever": "final_drive", "direction": 1 }
+      ],
+      "why": "A shorter gear keeps the engine where it makes power.",
+      "feel": "The revs should stay higher through the drift, and the car should respond instantly when you add throttle.",
+      "glossary": "power_band",
+      "limitAdvice": "This car's gearing isn't adjustable in the setup. Drift one gear lower so the revs stay in the power band."
+    },
+    {
+      "id": "front_washout",
+      "name": "Front washes out",
+      "group": "balance",
+      "metric": "frontWashRatio", "warn": 0.08, "full": 0.3,
+      "feedback": [],
+      "changes": [
+        { "lever": "pressure_front", "direction": -1 },
+        { "lever": "camber_front", "direction": -1 }
+      ],
+      "why": "More front grip at steering angle, so the nose turns in instead of sliding wide.",
+      "feel": "The front should bite when you turn in, and the car should follow the line you steer.",
+      "glossary": "slip_angle",
+      "limitAdvice": "This car can't add front grip with pressure or camber. Turn in a little slower and let the front load up first."
+    },
+    {
+      "id": "out_of_lock",
+      "name": "Runs out of lock",
+      "group": "balance",
+      "metric": "lockLimitRatio", "warn": 0.1, "full": 0.4,
+      "feedback": ["spins_out"],
+      // A spin caused by running out of lock is a lock problem, not a rear grip problem.
+      "outranks": { "symptom": "spin", "minTelemetry": 0.6 },
+      "changes": [
+        { "lever": "steer_lock", "direction": 1, "toFraction": 1.0 },
+        { "lever": "toe_front", "direction": 1, "steps": 1, "maxFractionOfRange": 0.08 }
+      ],
+      "why": "Gives the front more angle to catch the slide.",
+      "feel": "You should have steering left to catch the car at big angle, instead of hitting full lock and spinning.",
+      "glossary": "steering_lock",
+      "limitAdvice": "This car's steering lock and toe aren't adjustable in its setup, so this is a hardware limit of the car. Use slightly less angle, or pick a car or drift pack with more lock."
+    },
+    {
+      "id": "pressure_window",
+      "name": "Pressures out of window",
+      "group": "balance",
+      "metric": "pressureWorstAbs", "warn": 1.5, "full": 5.0,
+      "feedback": [],
+      "changes": [
+        { "lever": "pressure_front", "direction": -1, "stepsFromMetric": "pressureWorstAbs",
+          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "front" }, { "metric": "pressureWorstDelta", "op": ">", "value": 0 }] },
+        { "lever": "pressure_front", "direction": 1, "stepsFromMetric": "pressureWorstAbs",
+          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "front" }, { "metric": "pressureWorstDelta", "op": "<", "value": 0 }] },
+        { "lever": "pressure_rear", "direction": -1, "stepsFromMetric": "pressureWorstAbs",
+          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "rear" }, { "metric": "pressureWorstDelta", "op": ">", "value": 0 }] },
+        { "lever": "pressure_rear", "direction": 1, "stepsFromMetric": "pressureWorstAbs",
+          "when": [{ "metric": "pressureWorstAxle", "op": "==", "value": "rear" }, { "metric": "pressureWorstDelta", "op": "<", "value": 0 }] }
+      ],
+      "why": "Tyres work best inside their pressure window. Moving the cold pressure brings the hot pressure back towards the target.",
+      "feel": "Grip should feel more consistent from the start to the end of a run.",
+      "glossary": "pressure_window",
+      "limitAdvice": "This car's pressures are already at their limit. Keep runs a similar length so the tyres reach the same temperature."
+    },
+    {
+      "id": "twitchy",
+      "name": "Twitchy transitions",
+      "group": "fine",
+      "metric": "transitionYawAccel", "warn": 150, "full": 400,
+      "feedback": ["twitchy"],
+      "requiresFeedback": true,
+      "changes": [
+        { "lever": "rebound_rear", "direction": 1 },
+        { "lever": "arb_front", "direction": 1 }
+      ],
+      "why": "Slows weight transfer, so transitions are calmer.",
+      "feel": "When you switch direction the car should swing over smoothly instead of snapping to the other side.",
+      "glossary": "weight_transfer",
+      "limitAdvice": "This car's rear rebound and front bar are already maxed. Be smoother with the steering during the switch, and keep some throttle on."
+    },
+    {
+      "id": "chase_brake",
+      "name": "Chase: can't match the lead's angle",
+      "group": "fine",
+      "metric": "brakeAngleLossRatio", "warn": 0.05, "full": 0.25,
+      "feedback": ["lost_angle_braking"],
+      "requiresFeedback": true,
+      "requiresProfile": { "style": "chase" },
+      "changes": [
+        { "lever": "brake_bias", "direction": 1, "to": 66 }
+      ],
+      "why": "More front bias adds angle while braking, so you can tighten up behind the lead car.",
+      "feel": "A dab of left-foot brake should now add angle instead of straightening the car.",
+      "glossary": "brake_bias",
+      "limitAdvice": "This car's brake bias isn't adjustable or is already at 66% front or more. Use the handbrake briefly to add angle instead."
+    }
+  ],
+
+  // F10: starter drift baseline, as fractions of each item's range (0 = MIN, 1 = MAX).
+  "baseline": [
+    { "lever": "diff_power",   "fraction": 1.0,  "why": "Locked diff on throttle keeps both rears spinning together." },
+    { "lever": "diff_coast",   "fraction": 0.9,  "why": "Mostly locked off throttle so the car stays settled on entry." },
+    { "lever": "steer_lock",   "fraction": 1.0,  "why": "Maximum steering lock gives you room to catch big angle." },
+    { "lever": "pressure_front", "fraction": 0.35, "why": "Lower front pressure for front grip." },
+    { "lever": "pressure_rear",  "fraction": 0.6,  "why": "Rear pressure higher than the front, so the rear slides more willingly." },
+    { "lever": "camber_front", "fraction": 0.2,  "why": "Plenty of negative camber up front for grip at steering angle." },
+    { "lever": "camber_rear",  "fraction": 0.85, "why": "Little rear camber keeps the rear contact patch flat for forward bite." },
+    { "lever": "arb_front",    "fraction": 0.7,  "why": "Stiffer front bar makes the car rotate more easily." },
+    { "lever": "arb_rear",     "fraction": 0.4,  "why": "Softer rear bar keeps the rear predictable." }
+  ]
+}

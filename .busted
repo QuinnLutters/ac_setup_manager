@@ -1,0 +1,10 @@
+return {
+  _all = {
+    lpath = 'apps/lua/drift-setup-assistant/?.lua;spec/?.lua;?.lua',
+  },
+  default = {
+    ROOT = { 'spec' },
+    pattern = '_spec',
+    verbose = true,
+  },
+}
